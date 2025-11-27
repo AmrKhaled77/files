@@ -79,7 +79,7 @@ vector<string> splitFields(const string &s) {
     return out;
 }
 
-int loadCountID(const string &indexFile) {
+short loadCountID(const string &indexFile) {
     fstream f(indexFile, ios::binary | ios::in);
     if (!f.is_open()) return 0;
 
@@ -99,7 +99,7 @@ struct RecIndex {
     string body;
 };
 
-void insertInPrimaryIndex(char id[], short offset ,string indexFileName ,short &CountID) // insert sorted in the primary index
+void insertInPrimaryIndex(char id[], short offset ,const string& indexFileName ,short &CountID) // insert sorted in the primary index
 {
 	fstream prim(indexFileName, ios::out | ios::binary | ios::in);
 	int x = 0;
@@ -177,7 +177,8 @@ void insertInPrimaryIndex(char id[], short offset ,string indexFileName ,short &
 	prim.close();
 
 }
-short BinarySearchId(int ID1,string indexName ,short CountID) // binary search in the primary index
+
+short BinarySearchId(int ID1,const string& indexName ,short CountID) // binary search in the primary index
 {
     fstream prim(indexName, ios::in | ios::binary | ios::out);
     short first = 0;
@@ -215,7 +216,8 @@ short BinarySearchId(int ID1,string indexName ,short CountID) // binary search i
     }
 
 }
-void Deleteprimary(int ID1 ,string indexName ,short &CountID) // delete from primary index
+
+void Deleteprimary(int ID1 ,const string& indexName ,short &CountID) // delete from primary index
 {
 
     fstream prim(indexName, ios::in | ios::binary | ios::out);
@@ -261,6 +263,7 @@ void Deleteprimary(int ID1 ,string indexName ,short &CountID) // delete from pri
     }
     prim.close();
 }
+
 void loadIndex(const string &fname, unordered_map<string, RecIndex> &indexMap) {
     indexMap.clear();
     ensureFile(fname);
@@ -295,8 +298,9 @@ void loadIndex(const string &fname, unordered_map<string, RecIndex> &indexMap) {
     f.close();
 }
 
-void printPrimaryIndex(short CountID) {
-    fstream prim(DOCTOR_INDEX_FILE, ios::in | ios::binary);
+//for testing
+void printPrimaryIndex(short CountID ,  const string& indexName) {
+    fstream prim(indexName, ios::in | ios::binary);
 
     if (!prim.is_open()) {
         cout << "Cannot open index file!\n";
@@ -512,6 +516,10 @@ void listAllDoctors() {
     }
 }
 
+short searchForDocID(int id) {
+   return  BinarySearchId(id ,DOCTOR_INDEX_FILE, DocCountID);
+}
+
 // -------------------- Appointment operations --------------------
 void addAppointment() {
     unordered_map<string, RecIndex> docIdx;
@@ -600,6 +608,11 @@ void listAllAppointments() {
         cout << p.second.id << " | " << (f.size()>1?f[1]:"") << " | " << (f.size()>2?f[2]:"") << "\n";
     }
 }
+
+short searchForAppointID(int id) {
+    return  BinarySearchId(id ,APPOINTMENT_INDEX_FILE, appointmentCountID);
+}
+
 
 // -------------------- Menu --------------------
 void menu() {
