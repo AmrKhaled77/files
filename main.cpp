@@ -99,7 +99,7 @@ struct RecIndex {
     string body;
 };
 
-void insertInPrimaryIndex(char id[], short offset ,string indexFileName ,short CountID) // insert sorted in the primary index
+void insertInPrimaryIndex(char id[], short offset ,string indexFileName ,short &CountID) // insert sorted in the primary index
 {
 	fstream prim(indexFileName, ios::out | ios::binary | ios::in);
 	int x = 0;
@@ -215,7 +215,7 @@ short BinarySearchId(int ID1,string indexName ,short CountID) // binary search i
     }
 
 }
-void Deleteprimary(int ID1 ,string indexName ,short CountID) // delete from primary index
+void Deleteprimary(int ID1 ,string indexName ,short &CountID) // delete from primary index
 {
 
     fstream prim(indexName, ios::in | ios::binary | ios::out);
@@ -533,7 +533,11 @@ void addAppointment() {
     ensureFile(APPOINTMENT_FILE);
     long long slot = findFitInAvailAndRemove(APPOINTMENT_FILE, needed);
     fstream f(APPOINTMENT_FILE, ios::in | ios::out | ios::binary);
-    if (slot != -1) writeActiveBodyAt(f, slot, body), cout << "Appointment added (reused deleted slot)\n";
+    if (slot != -1) {
+        writeActiveBodyAt(f, slot, body);
+        cout << "Appointment added (reused deleted slot)\n";
+        recOffset=slot;
+    }
     else appendRecord(f, body), cout << "Appointment appended at file end\n";
     f.close();
     /* ---- UPDATE PRIMARY INDEX FOR APPOINTMENT ---- */
@@ -603,7 +607,7 @@ void menu() {
     ensureFile(APPOINTMENT_FILE);
     ensureFile(DOCTOR_INDEX_FILE);
     DocCountID = loadCountID(DOCTOR_INDEX_FILE);
-    appointmentCountID = loadCountID(APPOINTMENT_FILE);
+    appointmentCountID = loadCountID(APPOINTMENT_INDEX_FILE);
 
 
     int choice = 0;
