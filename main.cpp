@@ -8,9 +8,14 @@
 
 using namespace std;
 
+short DocCountID = 0;
+short appointmentCountID = 0;
+
 // -------------------- Files --------------------
 const string DOCTOR_FILE = "Doctors.dat";
 const string APPOINTMENT_FILE = "Appointments.dat";
+const string DOCTOR_INDEX_FILE = "DoctorIndex.ind";
+const string APPOINTMENT_INDEX_FILE = "AppointmentIndex.ind";
 
 // -------------------- Helpers --------------------
 int readIntAt(fstream &f, long long pos) {
@@ -74,6 +79,18 @@ vector<string> splitFields(const string &s) {
     return out;
 }
 
+int loadCountID(const string &indexFile) {
+    fstream f(indexFile, ios::binary | ios::in);
+    if (!f.is_open()) return 0;
+
+    f.seekg(0, ios::end);
+    long long bytes = f.tellg();
+    f.close();
+
+    return bytes / 6;   // each index record = 4 bytes key + 2 bytes offset
+}
+
+
 // -------------------- Index --------------------
 struct RecIndex {
     long long recOffset;
@@ -82,6 +99,168 @@ struct RecIndex {
     string body;
 };
 
+void insertInPrimaryIndex(char id[], short offset ,string indexFileName ,short CountID) // insert sorted in the primary index
+{
+	fstream prim(indexFileName, ios::out | ios::binary | ios::in);
+	int x = 0;
+	for (int i = 0; id[i] != '\0'; i++)
+	{
+		x *= 10;
+		x += (id[i] - '0');
+	}
+	int tmp = 0;
+	short of = 0;
+	bool hi = false;
+	if (CountID == 0)
+	{
+		prim.write((char*)&x, sizeof(int));
+		prim.write((char*)&offset, sizeof(short));
+		CountID++;
+		return;
+	}
+	prim.read((char*)&tmp, sizeof(tmp));
+	while (prim.good())
+	{
+		if (tmp > x)
+		{
+			hi = true;
+			prim.seekg(-4, ios::cur);
+			of = prim.tellg();
+			break;
+		}
+
+		prim.seekg(2, ios::cur);
+		prim.read((char*)&tmp, sizeof(tmp));
+
+	}
+	prim.close();
+	prim.open(indexFileName, ios::out | ios::binary | ios::in);
+
+	if (!hi){ ///in the last position
+		prim.seekg(CountID * 6, ios::beg);
+		prim.write((char*)&x, sizeof(int));
+		prim.write((char*)&offset, sizeof(short));
+		CountID++;
+	}
+	else{
+		prim.seekg((CountID - 1) * 6, ios::beg);
+		int numend;
+		short ofend;
+		prim.read((char*)& numend, sizeof(numend));
+		prim.read((char*)& ofend, sizeof(ofend));
+		prim.seekg(of, ios::beg);
+
+		while (prim.good())
+		{
+			int tmpnum; short tmpof;
+			int tmpnum1; short tmpof1;
+			prim.read((char*)& tmpnum, sizeof(tmpnum));
+			prim.read((char*)& tmpof, sizeof(tmpof));
+			prim.read((char*)& tmpnum1, sizeof(tmpnum1));
+			prim.read((char*)& tmpof1, sizeof(tmpof1));
+			prim.seekg(-6, ios::cur);
+			prim.write((char*)& tmpnum, sizeof(tmpnum));
+			prim.write((char*)& tmpof, sizeof(tmpof));
+
+		}
+		prim.close();
+		prim.open(indexFileName, ios::out | ios::in | ios::binary);
+		prim.seekg(0, ios::end);
+
+		prim.write((char*)& numend, sizeof(numend));
+		prim.write((char*)& ofend, sizeof(ofend));
+		prim.seekg(of, ios::beg);
+		prim.write((char*)& x, sizeof(x));
+		prim.write((char*)& offset, sizeof(of));
+		CountID++;
+	}
+	prim.close();
+
+}
+short BinarySearchId(int ID1,string indexName ,short CountID) // binary search in the primary index
+{
+    fstream prim(indexName, ios::in | ios::binary | ios::out);
+    short first = 0;
+    short last = CountID - 1;
+    short mid;
+    bool found = false;
+    int temp;
+    while (first <= last && !found)
+    {
+        mid = (first + last) / 2;
+        prim.seekg(mid * 6, ios::beg);
+        prim.read((char*)&temp, sizeof(temp));
+
+        if (temp == ID1)
+            found = true;
+        else if (temp >  ID1)
+            last = mid - 1;
+        else
+            first = mid + 1;
+    }
+    if (found)
+    {
+        short of;
+        prim.seekg((mid * 6) + 4, ios::beg);
+        prim.read((char*)&of, sizeof(of));
+        prim.close();
+        return of;
+    }
+    else
+    {
+        short nega=-1;
+        prim.close();
+        return nega;
+
+    }
+
+}
+void Deleteprimary(int ID1 ,string indexName ,short CountID) // delete from primary index
+{
+
+    fstream prim(indexName, ios::in | ios::binary | ios::out);
+    short first = 0;
+    short last = CountID - 1;
+    short mid;
+    bool found = false;
+    int temp;
+    while (first <= last && !found)
+    {
+        mid = (first + last) / 2;
+        prim.seekg(mid * 6, ios::beg);
+        prim.read((char*)&temp, sizeof(temp));
+
+        if (temp == ID1)
+            found = true;
+        else if (temp >  ID1)
+            last = mid - 1;
+        else
+            first = mid + 1;
+    }
+    if (found)
+    {
+        prim.seekg((mid + 1) * 6, ios::beg);
+
+        while (prim.good()) /// start to shift
+        {
+            int tmpnum; short tmpof;
+            prim.read((char*)& tmpnum, sizeof(tmpnum));
+            prim.read((char*)& tmpof, sizeof(tmpof));
+
+            prim.seekg(-12, ios::cur);
+            prim.write((char*)& tmpnum, sizeof(tmpnum));
+            prim.write((char*)& tmpof, sizeof(tmpof));
+            prim.seekg(6, ios::cur);
+
+        }
+        prim.close();
+        prim.open(indexName, ios::out | ios::in | ios::binary);
+
+        CountID--;
+
+    }
+    prim.close();
+}
 void loadIndex(const string &fname, unordered_map<string, RecIndex> &indexMap) {
     indexMap.clear();
     ensureFile(fname);
@@ -114,6 +293,38 @@ void loadIndex(const string &fname, unordered_map<string, RecIndex> &indexMap) {
         pos = bodyPos + rec_len;
     }
     f.close();
+}
+
+void printPrimaryIndex(short CountID) {
+    fstream prim(DOCTOR_INDEX_FILE, ios::in | ios::binary);
+
+    if (!prim.is_open()) {
+        cout << "Cannot open index file!\n";
+        return;
+    }
+
+    cout << "\n=== Primary Index Content (" <<"doctor" << ") ===\n";
+    cout << "Total Entries: " << CountID << "\n\n";
+
+    int id;
+    short offset;
+
+    for (int i = 0; i < CountID; i++) {
+        prim.seekg(i * 6, ios::beg);
+
+        prim.read(reinterpret_cast<char*>(&id), sizeof(id));
+        prim.read(reinterpret_cast<char*>(&offset), sizeof(offset));
+
+        if (!prim.good()) break;
+
+        cout << "Entry " << i
+             << " | ID = " << id
+             << " | Offset = " << offset
+             << "\n";
+    }
+
+    prim.close();
+    cout << "===========================================\n";
 }
 
 // -------------------- AVAIL list --------------------
@@ -210,6 +421,7 @@ long long findFitInAvailAndRemove(const string &fname, int neededLen) {
 void addDoctor() {
     unordered_map<string, RecIndex> idx;
     loadIndex(DOCTOR_FILE, idx);
+    long long recOffset;
 
     string id, name, address;
     cout << "Enter Doctor ID: "; cin >> id;
@@ -224,9 +436,24 @@ void addDoctor() {
     ensureFile(DOCTOR_FILE);
     long long slot = findFitInAvailAndRemove(DOCTOR_FILE, needed);
     fstream f(DOCTOR_FILE, ios::in | ios::out | ios::binary);
-    if (slot != -1) writeActiveBodyAt(f, slot, body), cout << "Doctor added (reused deleted slot)\n";
-    else appendRecord(f, body), cout << "Doctor appended at file end\n";
+
+
+    if (slot != -1) {
+        writeActiveBodyAt(f, slot, body);
+        recOffset = slot;
+        cout << "Doctor added (reused deleted slot)\n";
+    }
+    else {
+        recOffset = appendRecord(f, body);
+        cout << "Doctor appended at file end\n";
+    }
     f.close();
+
+    /* ---- UPDATE PRIMARY INDEX ---- */
+    insertInPrimaryIndex(const_cast<char*>(id.c_str()), (short)recOffset, DOCTOR_INDEX_FILE,DocCountID);
+
+
+
 }
 
 void deleteDoctor() {
@@ -241,6 +468,11 @@ void deleteDoctor() {
     writeLongAt(f, 0, it->second.recOffset);
     f.close();
     cout << "Doctor logically deleted\n";
+
+    /* ---- DELETE FROM PRIMARY INDEX ---- */
+    int num = stoi(id);
+    Deleteprimary(num, DOCTOR_INDEX_FILE,DocCountID);
+
 }
 
 void updateDoctorName() {
@@ -286,6 +518,7 @@ void addAppointment() {
     loadIndex(DOCTOR_FILE, docIdx);
     unordered_map<string, RecIndex> apIdx;
     loadIndex(APPOINTMENT_FILE, apIdx);
+    long long recOffset;
 
     string appID; cout << "Enter Appointment ID: "; cin >> appID;
     if (apIdx.find(appID) != apIdx.end()) { cout << "Appointment exists!\n"; return; }
@@ -303,6 +536,10 @@ void addAppointment() {
     if (slot != -1) writeActiveBodyAt(f, slot, body), cout << "Appointment added (reused deleted slot)\n";
     else appendRecord(f, body), cout << "Appointment appended at file end\n";
     f.close();
+    /* ---- UPDATE PRIMARY INDEX FOR APPOINTMENT ---- */
+    insertInPrimaryIndex(
+        const_cast<char*>(appID.c_str()),(short)recOffset,APPOINTMENT_INDEX_FILE,appointmentCountID);
+
 }
 
 void deleteAppointment() {
@@ -316,7 +553,11 @@ void deleteAppointment() {
     writeDeletedAt(f, it->second.recOffset, head);
     writeLongAt(f, 0, it->second.recOffset);
     f.close();
+    /* ---- DELETE FROM PRIMARY INDEX FOR APPOINTMENT ---- */
+    int num = stoi(id);
+    Deleteprimary(num, APPOINTMENT_INDEX_FILE,appointmentCountID);
     cout << "Appointment logically deleted\n";
+
 }
 
 void updateAppointmentDate() {
@@ -360,6 +601,11 @@ void listAllAppointments() {
 void menu() {
     ensureFile(DOCTOR_FILE);
     ensureFile(APPOINTMENT_FILE);
+    ensureFile(DOCTOR_INDEX_FILE);
+    DocCountID = loadCountID(DOCTOR_INDEX_FILE);
+    appointmentCountID = loadCountID(APPOINTMENT_FILE);
+
+
     int choice = 0;
     do {
         cout << "\n=== Healthcare Management ===\n";
