@@ -5,6 +5,7 @@
 #include <vector>
 #include <unordered_map>
 #include <limits>
+#include <algorithm>
 
 using namespace std;
 
@@ -16,6 +17,9 @@ const string DOCTOR_FILE = "Doctors.dat";
 const string APPOINTMENT_FILE = "Appointments.dat";
 const string DOCTOR_INDEX_FILE = "DoctorIndex.ind";
 const string APPOINTMENT_INDEX_FILE = "AppointmentIndex.ind";
+const string DOCTOR_NAME_INDEX_FILE = "DoctorNameIndex.ind";
+const string DOCTOR_ID_INDEX_FILE = "DoctoridIndex.ind";
+static const size_t INDEX_RECORD_SIZE = sizeof(int) + sizeof(long long);
 
 // -------------------- Helpers --------------------
 int readIntAt(fstream &f, long long pos) {
@@ -80,188 +84,193 @@ vector<string> splitFields(const string &s) {
 }
 
 short loadCountID(const string &indexFile) {
-    fstream f(indexFile, ios::binary | ios::in);
-    if (!f.is_open()) return 0;
 
+    ifstream f(indexFile, ios::binary);
+    if (!f.is_open()) return 0;
     f.seekg(0, ios::end);
     long long bytes = f.tellg();
     f.close();
-
-    return bytes / 6;   // each index record = 4 bytes key + 2 bytes offset
+    return static_cast<short>(bytes / INDEX_RECORD_SIZE);
 }
 
+int idStringToInt(const string &id) {
+    int x = 0;
+    for (char c : id) {
+        if (c >= '0' && c <= '9') {
+            x = x * 10 + (c - '0');
+        } else {
+            // If id contains non-digit chars, use std::hash fallback
+            return static_cast<int>(std::hash<string>()(id));
+        }
+    }
+    return x;
+}
 
-// -------------------- Index --------------------
+// --------------------Primary Index --------------------
 struct RecIndex {
     long long recOffset;
     int recLen;
     string id;
     string body;
 };
+void insertInPrimaryIndex(const string &keyIdStr, long long recOffset, const string& indexFileName, short &CountID) {
+    ensureFile(indexFileName);
+    fstream f(indexFileName, ios::in | ios::out | ios::binary);
 
-void insertInPrimaryIndex(char id[], short offset ,const string& indexFileName ,short &CountID) // insert sorted in the primary index
-{
-	fstream prim(indexFileName, ios::out | ios::binary | ios::in);
-	int x = 0;
-	for (int i = 0; id[i] != '\0'; i++)
-	{
-		x *= 10;
-		x += (id[i] - '0');
-	}
-	int tmp = 0;
-	short of = 0;
-	bool hi = false;
-	if (CountID == 0)
-	{
-		prim.write((char*)&x, sizeof(int));
-		prim.write((char*)&offset, sizeof(short));
-		CountID++;
-		return;
-	}
-	prim.read((char*)&tmp, sizeof(tmp));
-	while (prim.good())
-	{
-		if (tmp > x)
-		{
-			hi = true;
-			prim.seekg(-4, ios::cur);
-			of = prim.tellg();
-			break;
-		}
-
-		prim.seekg(2, ios::cur);
-		prim.read((char*)&tmp, sizeof(tmp));
-
-	}
-	prim.close();
-	prim.open(indexFileName, ios::out | ios::binary | ios::in);
-
-	if (!hi){ ///in the last position
-		prim.seekg(CountID * 6, ios::beg);
-		prim.write((char*)&x, sizeof(int));
-		prim.write((char*)&offset, sizeof(short));
-		CountID++;
-	}
-	else{
-		prim.seekg((CountID - 1) * 6, ios::beg);
-		int numend;
-		short ofend;
-		prim.read((char*)& numend, sizeof(numend));
-		prim.read((char*)& ofend, sizeof(ofend));
-		prim.seekg(of, ios::beg);
-
-		while (prim.good())
-		{
-			int tmpnum; short tmpof;
-			int tmpnum1; short tmpof1;
-			prim.read((char*)& tmpnum, sizeof(tmpnum));
-			prim.read((char*)& tmpof, sizeof(tmpof));
-			prim.read((char*)& tmpnum1, sizeof(tmpnum1));
-			prim.read((char*)& tmpof1, sizeof(tmpof1));
-			prim.seekg(-6, ios::cur);
-			prim.write((char*)& tmpnum, sizeof(tmpnum));
-			prim.write((char*)& tmpof, sizeof(tmpof));
-
-		}
-		prim.close();
-		prim.open(indexFileName, ios::out | ios::in | ios::binary);
-		prim.seekg(0, ios::end);
-
-		prim.write((char*)& numend, sizeof(numend));
-		prim.write((char*)& ofend, sizeof(ofend));
-		prim.seekg(of, ios::beg);
-		prim.write((char*)& x, sizeof(x));
-		prim.write((char*)& offset, sizeof(of));
-		CountID++;
-	}
-	prim.close();
-
-}
-
-short BinarySearchId(int ID1,const string& indexName ,short CountID) // binary search in the primary index
-{
-    fstream prim(indexName, ios::in | ios::binary | ios::out);
-    short first = 0;
-    short last = CountID - 1;
-    short mid;
-    bool found = false;
-    int temp;
-    while (first <= last && !found)
-    {
-        mid = (first + last) / 2;
-        prim.seekg(mid * 6, ios::beg);
-        prim.read((char*)&temp, sizeof(temp));
-
-        if (temp == ID1)
-            found = true;
-        else if (temp >  ID1)
-            last = mid - 1;
-        else
-            first = mid + 1;
+    int key = idStringToInt(keyIdStr);
+    if (CountID == 0) {
+        f.seekp(0, ios::end);
+        f.write(reinterpret_cast<char*>(&key), sizeof(key));
+        f.write(reinterpret_cast<char*>(&recOffset), sizeof(recOffset));
+        f.flush();
+        f.close();
+        CountID++;
+        return;
     }
-    if (found)
-    {
-        short of;
-        prim.seekg((mid * 6) + 4, ios::beg);
-        prim.read((char*)&of, sizeof(of));
-        prim.close();
-        return of;
-    }
-    else
-    {
-        short nega=-1;
-        prim.close();
-        return nega;
-
-    }
-
-}
-
-void Deleteprimary(int ID1 ,const string& indexName ,short &CountID) // delete from primary index
-{
-
-    fstream prim(indexName, ios::in | ios::binary | ios::out);
-    short first = 0;
-    short last = CountID - 1;
-    short mid;
-    bool found = false;
-    int temp;
-    while (first <= last && !found)
-    {
-        mid = (first + last) / 2;
-        prim.seekg(mid * 6, ios::beg);
-        prim.read((char*)&temp, sizeof(temp));
-
-        if (temp == ID1)
-            found = true;
-        else if (temp >  ID1)
-            last = mid - 1;
-        else
-            first = mid + 1;
-    }
-    if (found)
-    {
-        prim.seekg((mid + 1) * 6, ios::beg);
-
-        while (prim.good()) /// start to shift
-        {
-            int tmpnum; short tmpof;
-            prim.read((char*)& tmpnum, sizeof(tmpnum));
-            prim.read((char*)& tmpof, sizeof(tmpof));
-
-            prim.seekg(-12, ios::cur);
-            prim.write((char*)& tmpnum, sizeof(tmpnum));
-            prim.write((char*)& tmpof, sizeof(tmpof));
-            prim.seekg(6, ios::cur);
-
+    short lo = 0, hi = CountID - 1;
+    short pos = CountID;
+    while (lo <= hi) {
+        short mid = (lo + hi) / 2;
+        f.seekg(mid * INDEX_RECORD_SIZE, ios::beg);
+        int midKey;
+        f.read(reinterpret_cast<char*>(&midKey), sizeof(midKey));
+        if (!f) break;
+        if (midKey == key) {
+            // duplicate: replace offset (update) and return
+            f.read(reinterpret_cast<char*>(&recOffset), sizeof(recOffset)); // move stream
+            f.seekp(mid * INDEX_RECORD_SIZE + sizeof(int), ios::beg);
+            f.write(reinterpret_cast<char*>(&recOffset), sizeof(recOffset));
+            f.flush();
+            f.close();
+            return;
+        } else if (midKey < key) {
+            lo = mid + 1;
+        } else {
+            if (mid == 0) { pos = 0; break; }
+            hi = mid - 1;
+            pos = mid;
         }
-        prim.close();
-        prim.open(indexName, ios::out | ios::in | ios::binary);
-
-        CountID--;
-
     }
-    prim.close();
+    // pos is insertion index (0..CountID)
+    if (pos == CountID) {
+        // append
+        f.seekp(0, ios::end);
+        f.write(reinterpret_cast<char*>(&key), sizeof(key));
+        f.write(reinterpret_cast<char*>(&recOffset), sizeof(recOffset));
+        f.flush();
+        CountID++;
+        f.close();
+        return;
+    }
+    vector<char> tail;
+    f.seekg(pos * INDEX_RECORD_SIZE, ios::beg);
+    {
+        f.seekg(0, ios::end);
+        long long fileEnd = f.tellg();
+        long long tailBytes = fileEnd - (pos * INDEX_RECORD_SIZE);
+        tail.resize(static_cast<size_t>(tailBytes));
+        f.seekg(pos * INDEX_RECORD_SIZE, ios::beg);
+        if (tailBytes > 0) f.read(tail.data(), tailBytes);
+    }
+    // write back: new record, then old tail
+    f.seekp(pos * INDEX_RECORD_SIZE, ios::beg);
+    f.write(reinterpret_cast<char*>(&key), sizeof(key));
+    f.write(reinterpret_cast<char*>(&recOffset), sizeof(recOffset));
+    if (!tail.empty()) f.write(tail.data(), tail.size());
+    f.flush();
+    f.close();
+    CountID++;
+}
+
+long long BinarySearchId(int ID1, const string& indexName, short CountID) {
+    ensureFile(indexName);
+    fstream f(indexName, ios::in | ios::binary);
+    if (!f.is_open()) return -1;
+    short first = 0;
+    short last = CountID - 1;
+    while (first <= last) {
+        short mid = (first + last) / 2;
+        f.seekg(mid * INDEX_RECORD_SIZE, ios::beg);
+        int midKey;
+        long long midOffset;
+        f.read(reinterpret_cast<char*>(&midKey), sizeof(midKey));
+        f.read(reinterpret_cast<char*>(&midOffset), sizeof(midOffset));
+        if (!f) break;
+        if (midKey == ID1) {
+            f.close();
+            return midOffset;
+        } else if (midKey > ID1) {
+            if (mid == 0) break;
+            last = mid - 1;
+        } else {
+            first = mid + 1;
+        }
+    }
+    f.close();
+    return -1;
+}
+
+void Deleteprimary(int idInt, const string& indexName, short &CountID) {
+    ensureFile(indexName);
+    fstream f(indexName, ios::in | ios::out | ios::binary);
+    if (!f.is_open()) return;
+    short first = 0;
+    short last = CountID - 1;
+    short foundAt = -1;
+    while (first <= last) {
+        short mid = (first + last) / 2;
+        f.seekg(mid * INDEX_RECORD_SIZE, ios::beg);
+        int midKey;
+        f.read(reinterpret_cast<char*>(&midKey), sizeof(midKey));
+        if (!f) break;
+        if (midKey == idInt) { foundAt = mid; break; }
+        else if (midKey > idInt) {
+            if (mid == 0) break;
+            last = mid - 1;
+        } else first = mid + 1;
+    }
+    if (foundAt == -1) { f.close(); return; }
+
+    // If last entry, just truncate file
+    if (foundAt == CountID - 1) {
+        f.close();
+        // truncate file by rewriting up to (CountID-1)*INDEX_RECORD_SIZE
+        // Simple portable approach: read everything except last, rewrite file
+        ifstream in(indexName, ios::binary);
+        vector<char> buff((CountID - 1) * INDEX_RECORD_SIZE);
+        in.read(buff.data(), buff.size());
+        in.close();
+        ofstream out(indexName, ios::binary | ios::trunc);
+        if (!buff.empty()) out.write(buff.data(), buff.size());
+        out.close();
+        CountID--;
+        return;
+    }
+
+    // shift bytes after foundAt left by one record
+    f.seekg((foundAt + 1) * INDEX_RECORD_SIZE, ios::beg);
+    vector<char> tail;
+    f.seekg(0, ios::end);
+    long long fileEnd = f.tellg();
+    long long tailBytes = fileEnd - ((foundAt + 1) * INDEX_RECORD_SIZE);
+    tail.resize(static_cast<size_t>(tailBytes));
+    f.seekg((foundAt + 1) * INDEX_RECORD_SIZE, ios::beg);
+    if (tailBytes > 0) f.read(tail.data(), tailBytes);
+
+    f.seekp(foundAt * INDEX_RECORD_SIZE, ios::beg);
+    if (!tail.empty()) f.write(tail.data(), tail.size());
+    f.flush();
+    f.close();
+
+    ifstream in2(indexName, ios::binary);
+    vector<char> buff((CountID - 1) * INDEX_RECORD_SIZE);
+    in2.read(buff.data(), buff.size());
+    in2.close();
+    ofstream out2(indexName, ios::binary | ios::trunc);
+    if (!buff.empty()) out2.write(buff.data(), buff.size());
+    out2.close();
+
+    CountID--;
 }
 
 void loadIndex(const string &fname, unordered_map<string, RecIndex> &indexMap) {
@@ -297,7 +306,6 @@ void loadIndex(const string &fname, unordered_map<string, RecIndex> &indexMap) {
     }
     f.close();
 }
-
 //for testing
 void printPrimaryIndex(short CountID ,  const string& indexName) {
     fstream prim(indexName, ios::in | ios::binary);
@@ -330,6 +338,193 @@ void printPrimaryIndex(short CountID ,  const string& indexName) {
     prim.close();
     cout << "===========================================\n";
 }
+//-------------------Secondry index--------------------
+struct DoctorNameIndexEntry {
+    string name;   // Doctor name
+    int doctorID;  // Primary key (since names may repeat)
+};
+struct AppointmentDoctorIndexEntry {
+    int doctorID;  // Which doctor this appointment belongs to
+    int offset;    // Offset of appointment record in Appointments.dat
+};
+
+
+//-------------------Query parser--------------------
+
+vector<string> readDelimitedRecord(const string &fileName, long long offset) {
+    fstream f(fileName, ios::in | ios::binary);
+    if (!f) return {};
+
+    f.seekg(offset, ios::beg);
+
+    int size;
+    f.read((char*)&size, sizeof(size));
+    if (f.fail() || size <= 0) return {};
+
+    string raw(size, '\0');
+    f.read(&raw[0], size);
+
+    // Split by '|'
+    vector<string> fields;
+    string temp = "";
+    for (char c : raw) {
+        if (c == '|') {
+            fields.push_back(temp);
+            temp.clear();
+        } else {
+            temp += c;
+        }
+    }
+
+    return fields;
+}
+vector<string> getDoctorRecord(long long offset) {
+    return readDelimitedRecord(DOCTOR_FILE, offset);
+}
+vector<string> getAppointmentRecord(long long offset) {
+    return readDelimitedRecord(APPOINTMENT_FILE, offset);
+}
+
+struct ParsedQuery {
+    string columns;
+    string table;
+    string whereColumn;
+    string whereValue;
+};
+
+
+static string trim(const string &s) {
+    size_t start = s.find_first_not_of(" \t\n\r");
+    size_t end = s.find_last_not_of(" \t\n\r");
+    if (start == string::npos) return "";
+    return s.substr(start, end - start + 1);
+}
+string join(const vector<string>& v, const string& sep) {
+    string out;
+    for (size_t i = 0; i < v.size(); i++) {
+        if (i) out += sep;
+        out += v[i];
+    }
+    return out;
+}
+
+string extractColumns(const vector<string>& fields, const string& table, const string& columns) {
+    // SELECT *
+    if (columns == "*" || columns == "all")
+        return join(fields, ", ");
+
+    // Split selected columns
+    vector<string> cols;
+    string tmp;
+    for (char c : columns) {
+        if (c == ',') {
+            cols.push_back(trim(tmp));
+            tmp.clear();
+        } else tmp += c;
+    }
+    if (!tmp.empty()) cols.push_back(trim(tmp));
+
+    // Doctor: id, name, address
+    if (table == "doctor") {
+        vector<pair<string,int>> map = {
+            {"doctorid", 0}, {"name", 1}, {"address", 2}
+        };
+
+        string out = "";
+        for (auto& c : cols) {
+            for (auto& p : map) {
+                if (trim(c) == p.first && p.second < fields.size()) {
+                    if (!out.empty()) out += ", ";
+                    out += fields[p.second];
+                }
+            }
+        }
+        return out;
+    }
+
+    // Appointment: id, date, doctorId
+    if (table == "appointment") {
+        vector<pair<string,int>> map = {
+            {"appointmentid", 0}, {"date", 1}, {"doctorid", 2}
+        };
+
+        string out = "";
+        for (auto& c : cols) {
+            for (auto& p : map) {
+                if (trim(c) == p.first && p.second < fields.size()) {
+                    if (!out.empty()) out += ", ";
+                    out += fields[p.second];
+                }
+            }
+        }
+        return out;
+    }
+
+    return "";
+}
+
+ParsedQuery parseSelect(const string &input) {
+    string Query = input;
+    string lower = Query;
+    transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+
+    ParsedQuery r;
+
+    size_t selectPos = lower.find("select ");
+    size_t fromPos   = lower.find(" from ");
+    size_t wherePos  = lower.find(" where ");
+
+    r.columns = trim(Query.substr(selectPos + 7, fromPos - (selectPos + 7)));
+
+    if (wherePos == string::npos) {
+        r.table = trim(Query.substr(fromPos + 6));
+        return r;
+    }
+
+    r.table = trim(Query.substr(fromPos + 6, wherePos - (fromPos + 6)));
+
+    string wherePart = Query.substr(wherePos + 7);
+    size_t eqPos = wherePart.find('=');
+
+    r.whereColumn = trim(wherePart.substr(0, eqPos));
+    r.whereValue  = trim(wherePart.substr(eqPos + 1));
+
+    return r;
+}
+
+string applyQuery(ParsedQuery query) {
+    if (query.columns.empty() || query.whereColumn.empty())
+        return "";
+
+    // ---------------- DOCTOR: WHERE doctorid ----------------
+    if (query.table == "doctor" && query.whereColumn == "doctorid") {
+        long long offset = BinarySearchId(stoi(query.whereValue), DOCTOR_INDEX_FILE, DocCountID);
+        if (offset == -1) return "";
+        vector<string> record = getDoctorRecord(offset);
+        return extractColumns(record, "doctor", query.columns);
+    }
+
+    // ---------------- APPOINTMENT: WHERE appointmentid ----------------
+    else if (query.table == "appointment" && query.whereColumn == "appointmentid") {
+        long long offset = BinarySearchId(stoi(query.whereValue), APPOINTMENT_INDEX_FILE, appointmentCountID);
+        if (offset == -1) return "";
+        vector<string> record = getAppointmentRecord(offset);
+        return extractColumns(record, "appointment", query.columns);
+    }
+
+    // ---------------- DOCTOR: WHERE doctor name (full scan needed) ----------------
+    else if (query.table == "doctor" && query.whereColumn == "doctorname") {
+        // next step → I can generate full-scan search function if you want
+    }
+
+    // ---------------- APPOINTMENT: WHERE doctorId (needs inverted index or full scan) ----------------
+    else if (query.table == "appointment" && query.whereColumn == "doctorid") {
+        // next step → I can generate function to fetch all appointments by doctor
+    }
+
+    return "";
+}
+
 
 // -------------------- AVAIL list --------------------
 long long readAvailHead(const string &fname) {
@@ -454,7 +649,7 @@ void addDoctor() {
     f.close();
 
     /* ---- UPDATE PRIMARY INDEX ---- */
-    insertInPrimaryIndex(const_cast<char*>(id.c_str()), (short)recOffset, DOCTOR_INDEX_FILE,DocCountID);
+    insertInPrimaryIndex(id, recOffset, DOCTOR_INDEX_FILE,DocCountID);
 
 
 
@@ -549,8 +744,7 @@ void addAppointment() {
     else appendRecord(f, body), cout << "Appointment appended at file end\n";
     f.close();
     /* ---- UPDATE PRIMARY INDEX FOR APPOINTMENT ---- */
-    insertInPrimaryIndex(
-        const_cast<char*>(appID.c_str()),(short)recOffset,APPOINTMENT_INDEX_FILE,appointmentCountID);
+    insertInPrimaryIndex(appID,recOffset,APPOINTMENT_INDEX_FILE,appointmentCountID);
 
 }
 
@@ -628,7 +822,7 @@ void menu() {
         cout << "\n=== Healthcare Management ===\n";
         cout << "1. Add Doctor\n2. Delete Doctor\n3. Update Doctor Name\n4. Print Doctor\n5. List All Doctors\n";
         cout << "6. Add Appointment\n7. Delete Appointment\n8. Update Appointment Date\n9. Print Appointment\n10. List All Appointments\n11. Exit\n";
-        cout << "Choice: "; cin >> choice;
+        cout << "Choice: "; cin >> choice; 
         switch(choice) {
             case 1: addDoctor(); break;
             case 2: deleteDoctor(); break;
